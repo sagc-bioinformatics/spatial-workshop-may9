@@ -1,0 +1,136 @@
+---
+title: "01_visium_load"
+output:
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: console
+---
+
+# Installing packages
+
+First we're going to ensure the correct packages are installed.
+
+Depending on how you installed RStudio, and the OS you are on, this might be
+really easy or really complicated. Give the below a shot.
+
+
+```{r}
+# Install BiocManager
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+# Data structure for spatial transcriptomics, extends SingleCellExperiment
+BiocManager::install("SpatialExperiment")
+
+# Visualisation of spatial transcriptomics using SpatialExperiment
+BiocManager::install("ggspavis")
+
+# Used for defining spatially-variable genes (we may not actually use this)
+BiocManager::install("nnSVG")
+
+# Various useful functions intended for single-cell data
+BiocManager::install("scran")
+BiocManager::install("scater")
+
+# Small note, if you want to knit, browser must be set.
+#options(browser = 'firefox')
+```
+
+# Loading libraries
+
+We'll try and load the library here to avoid issues later on!
+
+```{r}
+library(SpatialExperiment)
+```
+
+If you ran into issues there, especially with having to compile packages, using a [binary repository](https://p3m.dev/client/) might help.
+Otherwise, we can try and provision an [RStudio cloud instance](https://posit.cloud/).
+
+# Downloading datasets
+
+We're going to download data from the [10X public datasets](https://www.10xgenomics.com/datasets), 
+starting with a [human lung cancer FFPE](https://www.10xgenomics.com/datasets/human-lung-cancer-ffpe-2-standard) 
+section. The following code will download this directly within R:
+
+```{r}
+files <- c(
+  "molecule_info.h5",
+  "filtered_feature_bc_matrix.tar.gz",
+  "raw_feature_bc_matrix.tar.gz",
+  "analysis.tar.gz",
+  "spatial.tar.gz",
+  "metrics_summary.csv",
+  "web_summary.html"
+)
+
+url = "https://cf.10xgenomics.com/samples/spatial-exp/2.0.0"
+name = "CytAssist_FFPE_Human_Lung_Squamous_Cell_Carcinoma"
+
+outs_dir = file.path('visium', 'outs')
+dir.create('visium')
+dir.create(outs_dir)
+
+
+options(timeout = 300) # We'll run out of time if we don't increase this timeout
+# We have to iterate like this for portability across download.file backends
+for (file in files) {
+  download.file(
+    url = sprintf("%s/%s/%s_%s", url, name, name, file),
+    destfile = sprintf("%s/%s", outs_dir, file)
+  )
+}
+
+```
+
+We can verify that the files are there:
+
+```{r}
+list.files(outs_dir)
+```
+
+Next ,we can extract those .tar.gz archives.
+
+```{r}
+# list all files in outs
+out_files <- list.files(outs_dir, full.names=TRUE)
+# get the ones ending in .tar.gz
+compressed_files <- out_files[grepl("\\.tar\\.gz$", out_files)]
+# untar each one
+lapply(compressed_files, untar, exdir = outs_dir)
+# now show our files all extracted:
+list.files(outs_dir)
+```
+
+If you've made it to this point, you should have the data downloaded!
+
+# Creating SpatialExperiment(SPE) object
+
+First let's have a quick look at the documentation:
+
+```{r}
+browseVignettes("SpatialExperiment")
+```
+
+At the minimum, you need a counts table, and a list of spot positions.
+The simplest way to create our object is to use the `read10xVisium` function.
+This function is aware of the structure of the spaceranger `outs` directory.
+
+```{r}
+
+spe <- read10xVisium(samples = outs_dir, type = "sparse", images = "hires")
+
+spe
+```
+
+
+# Save output
+
+Now we're going to save our object as an rds, which we can load up again later.
+
+```{r}
+saveRDS(spe, file = file.path('visium', 'visium_spe_original.rds'))
+```
+
+

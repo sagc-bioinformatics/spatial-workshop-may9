@@ -1,0 +1,119 @@
+---
+title: "SPE_shiny"
+output: html_document
+date: "2024-04-17"
+editor_options: 
+  chunk_output_type: console
+---
+
+# Demo spatialLIBD shiny app
+
+```{r}
+library(SpatialExperiment)
+library(spatialLIBD)
+library(shiny)
+
+# May want to run an example just to test if shiny is working
+#runExample("01_hello")
+```
+
+We need to obtain a GTF file:
+
+```{r}
+## Download the Gencode v32 GTF file and cache it
+bfc <- BiocFileCache::BiocFileCache()
+gtf_cache <- BiocFileCache::bfcrpath(
+    bfc,
+    paste0(
+        "ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/",
+        "release_32/gencode.v32.annotation.gtf.gz"
+    )
+)
+
+gtf_cache
+```
+
+Now we import and match to our spe...
+
+```{r}
+# Load our spe
+spe <- readRDS(file.path('visium', 'visium_spe_clust.rds'))
+
+## Import into R (takes ~1 min)
+gtf <- rtracklayer::import(gtf_cache)
+
+## Subset to genes only
+gtf <- gtf[gtf$type == "gene"]
+
+## Remove the .x part of the gene IDs
+gtf$gene_id <- gsub("\\..*", "", gtf$gene_id)
+
+## Set the names to be the gene IDs
+names(gtf) <- gtf$gene_id
+
+## Match the genes
+match_genes <- match(rownames(spe), gtf$gene_id)
+table(is.na(match_genes))
+```
+
+Add the data to our SPE:
+
+```{r}
+## Drop the few genes for which we don't have information
+spe <- spe[!is.na(match_genes), ]
+match_genes <- match_genes[!is.na(match_genes)]
+
+## Keep only some columns from the gtf (you could keep all of them if you want)
+mcols(gtf) <- mcols(gtf)[, c("source", "type", "gene_id", "gene_name", "gene_type")]
+
+rowRanges(spe) <- gtf[match_genes]
+
+## Inspect the gene annotation data we added
+rowRanges(spe)
+```
+
+Finally we just need to set some additional info uesd by spatialLIBD
+
+```{r}
+## Add some information used by spatialLIBD
+spe$key <- paste0(spe$sample_id, "_", colnames(spe))
+spe$sum_umi <- colSums(counts(spe))
+spe$sum_gene <- colSums(counts(spe) > 0)
+
+rowData(spe)$gene_search <- paste0(
+    rowData(spe)$gene_name, "; ", rowData(spe)$gene_id
+)
+
+## Add a variable for saving the manual annotations
+spe$ManualAnnotation <- "NA"
+
+# Add our cluster as a column
+spe$myCluster <- colLabels(spe)
+
+```
+
+
+# Run spatialLIBD Shiny app
+
+```{r}
+
+## Run our shiny app
+if (interactive()) {
+    run_app(
+        spe,
+        sce_layer = NULL,
+        modeling_results = NULL,
+        sig_genes = NULL,
+        title = "Lung FFPE",
+        spe_discrete_vars = c("myCluster"),
+        spe_continuous_vars = c("sum_umi", "sum_gene"),
+        default_cluster = "myCluster",
+    )
+}
+
+```
+
+
+
+
+

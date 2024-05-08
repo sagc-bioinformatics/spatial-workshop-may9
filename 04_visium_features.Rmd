@@ -1,0 +1,64 @@
+---
+title: "R Notebook"
+output: 04_visium_features
+editor_options: 
+  chunk_output_type: console
+---
+
+
+Let's load our already qc-d SPE.
+
+```{r}
+library(SpatialExperiment)
+library(ggspavis)
+library(nnSVG)
+library(scran)
+
+spe <- readRDS(file.path('visium', 'visium_spe_qc.rds'))
+```
+
+# Feature selection
+
+My plan was to use nnSVG to define spatially-variable genes.
+Unfortunately, this particular method is quite slow and memory intensive,
+So for time, we're going to use a method that doesn't make use of the spatial data.
+This will be more similar to the simple variance analysis we previously performed.
+
+
+```{r}
+dec <- modelGeneVar(spe)
+top_hvgs <- getTopHVGs(dec, prop = 0.1)
+length(top_hvgs)
+```
+
+Save this list of genes as an rds:
+
+```{r}
+saveRDS(top_hvgs, file = file.path('visium', 'top_hvgs.rds'))
+```
+
+# Plot some of those genes
+
+We can plot these now using the log counts, and explore some different genes:
+
+```{r}
+gene <- top_hvgs[20]
+plotVisium(spe,
+           annotate = gene, 
+           point_size = 1, 
+           image_ids="hires_bw", 
+           assay="logcounts")
+```
+
+At this point it might be nice to alter our rownames, 
+allowing us to select by gene symbol:
+
+```{r}
+rowData(spe)$gene_id <- rownames(spe)
+rownames(spe) <- rowData(spe)$symbol
+plotVisium(spe,
+           annotate = "SPP1", 
+           point_size = 1, 
+           image_ids="hires_bw", 
+           assay="logcounts")
+```

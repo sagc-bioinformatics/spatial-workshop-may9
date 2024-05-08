@@ -1,0 +1,115 @@
+---
+title: "R Notebook"
+output: 05_visium_clustering
+editor_options: 
+  chunk_output_type: console
+---
+
+# Dimensionality reduction algorithms
+
+We have so many features (genes), we can't possibly visualize them all.
+We have to reduce the dimensionality of our data.
+
+Let's load our already qc-d SPE.
+
+
+```{r}
+library(SpatialExperiment)
+library(ggspavis)
+library(scater)
+library(scran)
+library(pheatmap)
+
+spe <- readRDS(file.path('visium', 'visium_spe_qc.rds'))
+
+top_hvgs <- readRDS(file.path('visium', 'top_hvgs.rds'))
+
+# SVGs defined via nnSVG
+#top_svgs <- readRDS(file.path('visium', 'top_svgs.rds'))
+```
+
+We're going to use PCA from scater.
+
+```{r}
+set.seed(101) # setting a seed makes the following analysis repeatable
+spe <- runPCA(spe, subset_row = rownames(top_hvgs))
+reducedDimNames(spe)
+```
+
+We can also easily use UMAP:
+
+```{r}
+set.seed(101) # setting a seed makes the following analysis repeatable
+spe <- runUMAP(spe, dimred = "PCA")
+reducedDimNames(spe)
+plotDimRed(spe, plot_type = "UMAP")
+```
+
+At this point, this becomes more art than science...
+
+# Clustering
+
+
+We're going to use K-nearest neighbors clustering using scran's `buildSNNGraph`.
+
+```{r}
+
+k <- 100 # number of nearest neighbours - higher generally better
+# Build a graph to walk on from the UMAP result
+g <- buildSNNGraph(spe, k = k, use.dimred = "UMAP")
+# Walk this graph, identify group membership
+g_walk <- igraph::cluster_walktrap(g)
+clus <- g_walk$membership
+# See cluster membership counts
+table(clus)
+# Store cluster labels in the SPE
+colLabels(spe) <- factor(clus)
+```
+
+Now we can visualise our clusters:
+
+```{r}
+plotSpots(spe, annotate = "label", point_size = 1)
+```
+
+We can also visualise this back on our UMAP or PCA:
+
+```{r}
+plotDimRed(spe, plot_type = "PCA", annotate = "label")
+```
+
+Save our SPE with clusters included:
+
+```{r}
+saveRDS(spe, file = file.path('visium', 'visium_spe_clust.rds'))
+```
+
+
+# Plot DEGs between clusters.
+
+
+Finally, let's do some DEG analysis.
+It looks like we've got a well-defined tumour area, so let's start there.
+
+```{r}
+# Set rownames to symbol rather than gene id
+rownames(spe) <- rowData(spe)$symbol
+
+# Test for marker genes, with a dataframe per cluster
+# Inspect these dataframes for pvale, FDR, logFC, etc
+markers <- findMarkers(spe, test = "binom", direction = "up")
+markers
+```
+
+# Identify top differences in one of our clusters vs. all other clusters:
+
+```{r}
+cluster_of_interest <- markers[[1]]
+# Rank here is the minimum rank for the gene across all pairwise comparisons
+top_DEGs <- cluster_of_interest[cluster_of_interest$Top <= 10, ]
+# Extract effect sizes
+logFCs <- getMarkerEffects(top_DEGs)
+# Plot heatmap of these changes
+pheatmap(logFCs, breaks = seq(-5, 5, length.out = 101))
+```
+

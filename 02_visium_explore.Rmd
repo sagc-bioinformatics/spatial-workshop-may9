@@ -1,0 +1,103 @@
+---
+title: "02_visium_explore"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+First step is to load the previously created .rds file.
+```{r}
+library(SpatialExperiment)
+library(ggspavis)
+
+spe <- readRDS(file.path('visium', 'visium_spe_original.rds'))
+```
+
+We can do all kinds of things with our data...
+
+We can for example examine the counts table:
+
+```{r}
+# Look at the spots with highest counts
+tail(sort(colSums(assays(spe)$counts)))
+
+# Look at the genes with highest variance
+tail(sort(rowVars(assays(spe)$counts)))
+```
+
+Let's try simply plotting spots (notice that the image is upside down!):
+
+```{r}
+# Create a dataframe with x and y as desired
+data <- data.frame(
+  x = spatialCoords(spe)[,1],
+  y = spatialCoords(spe)[,2]
+)
+
+# Plot using ggplot
+ggplot(data, aes(x = x, y = y)) +
+  geom_point(size = 0.5) +
+  theme(aspect.ratio=1) +
+  labs(title = "spatialCoords", x = "X pos", y = "Y pos")
+```
+
+Thee ggspavis library makes it easier to do simple tasks like this:
+
+```{r}
+# Plot spots with just one step. This is also using ggplot underneath.
+plotSpots(spe)
+```
+
+And it better matches the image:
+
+```{r}
+# See image data info
+imgData(spe)
+
+# Retrieve a specific image
+img <- imgRaster(spe, 
+    sample_id = "sample01", 
+    image_id = "hires")
+
+plot(imgRaster(spe))
+```
+We can load, edit and save an image..
+
+```{r}
+library(EBImage)
+img <- EBImage::readImage(file.path('visium', 'outs', 'spatial', 'tissue_hires_image.png'))
+colorMode(img) <- Grayscale
+img <- img - 0.5
+plot(img)
+writeImage(
+  img[,,1],
+  file.path('visium', 'outs', 'spatial', 'tissue_hires_image.jpg'),
+  quality = 75
+)
+```
+
+Then load this into our SPE:
+
+```{r}
+scale <- imgData(spe)$scaleFactor
+
+spe <- addImg(spe, 
+    sample_id = "sample01", 
+    image_id = "hires_bw",
+    imageSource = file.path('visium', 'outs', 'spatial', 'tissue_hires_image.jpg'), 
+    scaleFactor = scale, 
+    load = TRUE)
+```
+
+And easily plot it:
+
+```{r}
+# Try annotating this with one of the genes you identified earlier!
+plotVisium(spe, point_size = 1, image_ids="hires_bw")
+```
+
+# Finally we're going to re-save our SPE with the newly created image
+
+```{r}
+saveRDS(spe, file = file.path('visium', 'visium_spe_img.rds'))
+```

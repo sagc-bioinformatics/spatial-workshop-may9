@@ -1,0 +1,185 @@
+---
+title: "03_visium_QC"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+# Quality control / filtering
+
+First we're going to load our rds again:
+
+```{r}
+library(SpatialExperiment)
+library(ggspavis)
+library(scater)
+
+spe <- readRDS(file.path('visium', 'visium_spe_img.rds'))
+```
+
+
+
+
+# Making subsets
+
+```{r}
+# Our data is actually already filtered to only include spots above tissue
+all(colData(spe)$in_tissue)
+
+# But we can subset our SPE like so:
+spe <- spe[ , colData(spe)$in_tissue == TRUE ]
+
+# we could subset by coordinates, e.g:
+plotSpots(spe[ , colData(spe)$array_col > 40 ])
+```
+
+
+# Calculate QC metrics
+
+We're going to be using [scater](https://doi.org/10.1093/bioinformatics/btw777)
+to do our spot-level QC.
+
+The excellent online book [Best Practices for Spatial Transcriptomics Analysis with Bioconductor](https://lmweber.org/BestPracticesST/) has examples of using cell counts
+to perform quality control.
+We don't have cell numbers in this dataset, so we'll just do some basic tasks.
+
+## Mitochondrial genes
+
+We can just identify these by name like so:
+
+```{r}
+# Note: in humans this symbol is upper case - not so for all organisms!
+is_mito <- grepl("^MT-", rowData(spe)$symbol)
+table(is_mito)
+```
+
+We want the above logical vector so we can make a subset later...
+For now let's just look at our list of genes:
+
+```{r}
+rowData(spe)[is_mito,]
+```
+
+## Let's take a look at our colData before adding QC...
+
+```{r}
+head(colData(spe))
+```
+
+
+## Now, we run addPerCellQC to add in some QC metrics
+
+Take a look at `?scuttle::perCellQCMetrics`.
+
+We get sum of *UMI* counts (library size), number of detected features, and the same for each subset we specify.
+
+```{r}
+# running this twice can cause duplication, be careful!
+spe <- addPerCellQC(spe, subsets = list(mito = is_mito))
+head(colData(spe))
+```
+
+# Filtering using thresholds
+
+1. library size
+
+We can take a look at the distribution to look for issues:
+
+(Also, take a look at `?plotSpotQC`)
+
+```{r}
+
+#hist(colData(spe)$sum, breaks=50)
+# hist(colData(spe)$sum, breaks=100, xlim = c(0,30000)) # take a closer look...
+# spaceranger does its own filtering
+plotSpotQC(spe, plot_type = "histogram", x_metric = "sum")
+```
+
+
+Nothing jumps out, so let's just try an arbitrary threshold.
+
+
+```{r}
+libsize_filter <- colData(spe)$sum < 200
+colData(spe)$libsize_filter <- libsize_filter
+table(libsize_filter)
+```
+
+We can set this as a column in our SPE and examine the distribution of spots:
+
+It appears we've filtered quite a few spots on the edge of the tissue region.
+This is probably techincal rather than biological, but to say for sure requires some background info.
+(Try setting the threshold higher, you'll start to see things that are probably biological features)
+
+```{r}
+colData(spe)$libsize_filter <- libsize_filter
+
+# And we can check the distribution of spots we're filtering:
+plotSpotQC(spe, plot_type = "histogram", x_metric = "sum", annotate = "libsize_filter")
+
+plotSpotQC(spe, plot_type = "spot", annotate = "libsize_filter")
+```
+
+
+2. n expressed features
+
+Let's do the same for number genes per spot.
+
+```{r}
+plotSpotQC(spe, plot_type = "histogram", x_metric = "detected")
+```
+```{r}
+gene_filter <- colData(spe)$detected < 500
+colData(spe)$gene_filter <- gene_filter
+table(gene_filter)
+plotSpotQC(spe, plot_type = "spot", annotate = "gene_filter")
+
+
+```
+3. Mitochnodrial read proportion
+
+```{r}
+plotSpotQC(spe, plot_type = "histogram", x_metric = "subsets_mito_percent")
+```
+Most of our data is very low % mitochondrial content... we probably don't even need to filter.
+You can see if I do set it at e.g. 5% we start to get some very spatially-localised spots...
+Note that spaceranger doesn't do mito filtering
+```{r}
+mito_filter <- colData(spe)$subsets_mito_percent > 10
+colData(spe)$mito_filter <- mito_filter
+table(mito_filter)
+plotSpotQC(spe, plot_type = "spot", annotate = "mito_filter")
+
+```
+# Filtering
+
+We've created some metrics, which we can now use to filter our object by.
+Combine them, and check how many spots this removes.
+
+```{r}
+discard <- libsize_filter | gene_filter | mito_filter
+
+colData(spe)$discard <- discard
+
+table(discard)
+
+plotSpotQC(spe, plot_type = "spot", annotate = "discard")
+```
+# Do the removal
+
+```{r}
+spe <- spe[, !colData(spe)$discard]
+dim(spe)
+```
+
+# Do normalization
+
+```{r}
+spe <- logNormCounts(spe)
+```
+
+# Save RDS checkpoint
+
+```{r}
+saveRDS(spe, file = file.path('visium', 'visium_spe_qc.rds'))
+```

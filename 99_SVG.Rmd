@@ -1,0 +1,69 @@
+---
+title: "04_1_SVG"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+# This notebook demonstrates how to use nnSVG (optional!)
+
+```{r}
+library(SpatialExperiment)
+library(ggspavis)
+library(nnSVG)
+
+spe <- readRDS(file.path('visium', 'visium_spe_qc.rds'))
+```
+
+# Spatially-aware feature selection
+
+We're going to use nnSVG to define spatially-variable genes.
+
+This particular method is quite slow and memory intensive,
+So we're going to aggressively subset the data.
+
+```{r}
+
+# Take a random sample of spots
+n <- 100
+set.seed(101) # set seed to get same random set each time
+spe_nnSVG <- spe[, sample(seq_len(n), n)]
+```
+
+At this point, we can also do some gene-level filtering, e.g. removing lowly
+expressed genes. This function from nnSVG will retain genes with at least ncounts
+in pcspots percent of spots.
+
+```{r}
+# this function requires "gene_name" to be in rowdata..
+# I've set this really high, just because I want it to go faster.
+rowData(spe_nnSVG)$gene_name <- rowData(spe_nnSVG)$symbol
+spe_nnSVG <- filter_genes(
+  spe_nnSVG, filter_genes_ncounts = 20, filter_genes_pcspots = 5
+)
+```
+
+# Normalization
+
+recalculate log-transformed normalized counts.
+
+We have to run it after doing a gene filter, and also it is required by nnSVG.
+```{r}
+spe_nnSVG <- logNormCounts(spe_nnSVG)
+```
+
+# Spatially variable genes
+
+Be careful running this.
+It will eat up loads of memory if you pump n_threads up high.
+
+```{r}
+spe_nnSVG <- nnSVG(spe_nnSVG, n_neighbors = 5, n_threads = 2)
+```
+
+```{r}
+top_svgs <- rowData(spe_nnSVG)[order(rowData(spe_nnSVG)$rank, decreasing = FALSE),]
+
+# let's save the top 300 ranked SVGs
+saveRDS(top_svgs[1:300,], file = file.path('visium', 'top_svgs.rds'))
+```
